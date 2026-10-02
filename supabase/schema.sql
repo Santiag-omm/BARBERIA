@@ -21,11 +21,13 @@ on public.appointments (appointment_date, appointment_time)
 where status <> 'cancelada';
 
 -- Permite que el formulario público cree una reserva; no permite leer datos de clientes.
+drop policy if exists "Public booking inserts" on public.appointments;
 create policy "Public booking inserts"
 on public.appointments for insert
 with check (true);
 
 -- Las cuentas de Supabase autenticadas pueden gestionar las reservas.
+drop policy if exists "Authenticated staff manage appointments" on public.appointments;
 create policy "Authenticated staff manage appointments"
 on public.appointments for all to authenticated
 using (true)
@@ -50,6 +52,10 @@ create table if not exists public.barbers (
 alter table public.services enable row level security;
 alter table public.barbers enable row level security;
 
+drop policy if exists "Public reads services" on public.services;
+drop policy if exists "Staff manage services" on public.services;
+drop policy if exists "Public reads barbers" on public.barbers;
+drop policy if exists "Staff manage barbers" on public.barbers;
 create policy "Public reads services" on public.services for select using (true);
 create policy "Staff manage services" on public.services for all to authenticated using (true) with check (true);
 create policy "Public reads barbers" on public.barbers for select using (true);
@@ -85,6 +91,10 @@ insert into public.services (name, price, duration, active)
 select 'Arreglo de Barba', 90, 30, true
 where not exists (select 1 from public.services where name = 'Arreglo de Barba');
 
+update public.barbers
+set name = 'Jackie Ramos', specialty = 'Estilista', initials = 'JR', color = 'bg-amber-700'
+where name = 'Mateo Cruz';
+
 insert into public.barbers (name, specialty, initials, color)
-select 'Mateo Cruz', 'Fade Master', 'MC', 'bg-amber-700'
+select 'Jackie Ramos', 'Estilista', 'JR', 'bg-amber-700'
 where not exists (select 1 from public.barbers);
