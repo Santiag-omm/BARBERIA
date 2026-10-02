@@ -24,6 +24,8 @@ const isSunday = (date) => new Date(`${date}T12:00:00`).getDay() === 0
 const dateValue = (date) => date.toLocaleDateString('en-CA')
 const bookingDates = Array.from({ length: 14 }, (_, index) => { const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + index); return dateValue(date) })
 const toAppointment = (row) => ({ id: row.id, client: row.client_name, phone: row.phone, service: row.service, barber: row.barber, date: row.appointment_date, time: row.appointment_time, status: row.status, price: Number(row.price) })
+const toService = (row) => ({ id: row.id, name: row.name, price: Number(row.price), duration: row.duration, active: row.active })
+const toBarber = (row) => ({ id: row.id, name: row.name, specialty: row.specialty, initials: row.initials, color: row.color })
 
 function Brand() {
   return <div className="flex items-center gap-3"><div className="grid h-10 w-10 place-items-center border border-[#c9a84c] text-[#c9a84c]"><Scissors size={20} /></div><p className="font-serif text-2xl italic leading-none text-[#f5f5f5] drop-shadow-[0_1px_10px_rgba(201,168,76,0.25)]">BarberShop</p></div>
@@ -31,11 +33,11 @@ function Brand() {
 function StepTitle({ eyebrow, title, description }) {
   return <div className="mb-7"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#c9a84c]">{eyebrow}</p><h2 className="mt-2 font-serif text-3xl">{title}</h2><p className="mt-2 text-sm text-[#a0a0a0]">{description}</p></div>
 }
-function PublicBooking({ services, barbers, step, setStep, booking, setBooking, success, setSuccess, setAppointments, saveAppointment }) {
+function PublicBooking({ services, barbers, step, setStep, booking, setBooking, success, setSuccess, saveAppointment, occupiedTimes }) {
   const selectedService = services.find((item) => item.id === booking.service)
   const selectedBarber = barbers[0]
   const steps = ['Servicio', 'Fecha y hora', 'Contacto', 'Confirmar']
-  const occupied = ['10:30', '12:00', '5:00']
+  const occupied = occupiedTimes
   const canContinue = step === 1 ? booking.service : step === 2 ? booking.date && booking.time && !isSunday(booking.date) : step === 3 ? booking.name.trim() && /^\d{10}$/.test(booking.phone) : true
   const confirm = async () => {
     const appointment = { id: Date.now(), client: booking.name, phone: booking.phone, service: selectedService.name, barber: selectedBarber.name, date: booking.date, time: booking.time, status: 'confirmada', price: selectedService.price }
@@ -54,15 +56,15 @@ function PublicBooking({ services, barbers, step, setStep, booking, setBooking, 
 }
 function SectionHeader({ title, text, action }) { return <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#c9a84c]">Administración</p><h1 className="mt-2 font-serif text-3xl">{title}</h1><p className="mt-1 text-sm text-[#a0a0a0]">{text}</p></div>{action}</div> }
 function StatusBadge({ status }) { return <span className={`status ${status}`}>{status}</span> }
-function AdminPanel({ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment }) {
+function AdminPanel({ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment, saveCatalogItem, deleteCatalogItem }) {
   const [tab, setTab] = useState('Dashboard'); const [statusFilter, setStatusFilter] = useState('todas'); const [modal, setModal] = useState(null); const [schedule, setSchedule] = useState({ start: '10:00', end: '20:00', days: [true, true, true, true, true, true, false] })
   const tabs = [['Dashboard', LayoutDashboard], ['Citas', CalendarDays], ['Servicios', Scissors], ['Barberos', Users], ['Horarios', Settings2]]
-  const save = (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); if (modal.type === 'service') { const item = { id: modal.item?.id || Date.now(), name: form.get('name'), price: Number(form.get('price')), duration: Number(form.get('duration')), active: modal.item?.active ?? true }; setServices((items) => modal.item ? items.map((x) => x.id === item.id ? item : x) : [...items, item]) } else { const name = form.get('name'); const item = { id: modal.item?.id || Date.now(), name, specialty: form.get('specialty'), initials: name.split(' ').map((part) => part[0]).join('').slice(0, 2), color: 'bg-amber-700' }; setBarbers((items) => modal.item ? items.map((x) => x.id === item.id ? item : x) : [...items, item]) } setModal(null) }
-  const remove = () => { if (modal.type === 'appointment') updateAppointment(modal.item.id, 'cancelada'); if (modal.type === 'delete-service') setServices((items) => items.filter((x) => x.id !== modal.item.id)); if (modal.type === 'delete-barber') setBarbers((items) => items.filter((x) => x.id !== modal.item.id)); setModal(null) }
+  const save = async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const type = modal.type; const item = type === 'service' ? { id: modal.item?.id, name: form.get('name'), price: Number(form.get('price')), duration: Number(form.get('duration')), active: modal.item?.active ?? true } : { id: modal.item?.id, name: form.get('name'), specialty: form.get('specialty'), initials: form.get('name').split(' ').map((part) => part[0]).join('').slice(0, 2), color: modal.item?.color || 'bg-amber-700' }; const savedItem = await saveCatalogItem(type, item); if (!savedItem) return; if (type === 'service') setServices((items) => modal.item ? items.map((current) => current.id === savedItem.id ? savedItem : current) : [...items, savedItem]); else setBarbers((items) => modal.item ? items.map((current) => current.id === savedItem.id ? savedItem : current) : [...items, savedItem]); setModal(null) }
+  const remove = async () => { if (modal.type === 'appointment') await updateAppointment(modal.item.id, 'cancelada'); if (modal.type === 'delete-service') { if (await deleteCatalogItem('service', modal.item.id)) setServices((items) => items.filter((item) => item.id !== modal.item.id)) } if (modal.type === 'delete-barber') { if (await deleteCatalogItem('barber', modal.item.id)) setBarbers((items) => items.filter((item) => item.id !== modal.item.id)) } setModal(null) }
   return <div className="min-h-screen"><header className="border-b border-[#c9a84c]/20 bg-[#1a1916]"><div className="mx-auto flex max-w-7xl items-center gap-8 px-5 py-5"><Brand /><nav className="hide-scrollbar flex flex-1 gap-1 overflow-x-auto">{tabs.map(([name, Icon]) => <button key={name} onClick={() => setTab(name)} className={`admin-tab ${tab === name ? 'active' : ''}`}><Icon size={16} /> {name}</button>)}</nav></div></header><div className="mx-auto max-w-7xl px-5 py-9">
     {tab === 'Dashboard' && <Dashboard appointments={appointments} />}
     {tab === 'Citas' && <><SectionHeader title="Citas" text="Organiza y administra el calendario de reservas." /><div className="mb-5 flex flex-wrap gap-2">{['todas', 'pendiente', 'confirmada', 'completada', 'cancelada'].map((status) => <button key={status} onClick={() => setStatusFilter(status)} className={`filter ${statusFilter === status ? 'active' : ''}`}>{status}</button>)}</div><div className="overflow-x-auto rounded border border-[#c9a84c]/20 bg-[#1a1916]"><table><thead><tr><th>Cliente</th><th>Servicio</th><th>Fecha</th><th>Estado</th><th></th></tr></thead><tbody>{appointments.filter((item) => statusFilter === 'todas' || item.status === statusFilter).map((item) => <tr key={item.id}><td><strong>{item.client}</strong><span>{item.time} h</span></td><td>{item.service}<span>{item.barber}</span></td><td>{dateLabel(item.date)}</td><td><StatusBadge status={item.status} /></td><td><div className="flex gap-2">{item.status === 'pendiente' && <button onClick={() => updateAppointment(item.id, 'confirmada')} className="icon-button"><Check size={15} /></button>}{item.status !== 'cancelada' && <button onClick={() => setModal({ type: 'appointment', item })} className="icon-button danger"><X size={15} /></button>}</div></td></tr>)}</tbody></table></div></>}
-    {tab === 'Servicios' && <><SectionHeader title="Servicios" text="Catálogo y disponibilidad de tus experiencias." action={<button onClick={() => setModal({ type: 'service' })} className="gold-button"><Plus size={16} /> Nuevo servicio</button>} /><div className="grid gap-3 md:grid-cols-2">{services.map((item) => <div className="list-card" key={item.id}><div><h3 className="font-serif text-xl">{item.name}</h3><p className="mt-1 text-sm text-[#a0a0a0]">{currency.format(item.price)} · {item.duration} min.</p></div><div className="flex items-center gap-2"><button onClick={() => setServices((items) => items.map((x) => x.id === item.id ? { ...x, active: !x.active } : x))} className={`switch ${item.active ? 'on' : ''}`}><span /></button><button onClick={() => setModal({ type: 'service', item })} className="icon-button"><Edit3 size={15} /></button><button onClick={() => setModal({ type: 'delete-service', item })} className="icon-button danger"><Trash2 size={15} /></button></div></div>)}</div></>}
+    {tab === 'Servicios' && <><SectionHeader title="Servicios" text="Catálogo y disponibilidad de tus experiencias." action={<button onClick={() => setModal({ type: 'service' })} className="gold-button"><Plus size={16} /> Nuevo servicio</button>} /><div className="grid gap-3 md:grid-cols-2">{services.map((item) => <div className="list-card" key={item.id}><div><h3 className="font-serif text-xl">{item.name}</h3><p className="mt-1 text-sm text-[#a0a0a0]">{currency.format(item.price)} · {item.duration} min.</p></div><div className="flex items-center gap-2"><button onClick={async () => { const savedItem = await saveCatalogItem('service', { ...item, active: !item.active }); if (savedItem) setServices((items) => items.map((current) => current.id === savedItem.id ? savedItem : current)) }} className={`switch ${item.active ? 'on' : ''}`}><span /></button><button onClick={() => setModal({ type: 'service', item })} className="icon-button"><Edit3 size={15} /></button><button onClick={() => setModal({ type: 'delete-service', item })} className="icon-button danger"><Trash2 size={15} /></button></div></div>)}</div></>}
     {tab === 'Barberos' && <><SectionHeader title="Barberos" text="Administra el equipo y sus especialidades." action={<button onClick={() => setModal({ type: 'barber' })} className="gold-button"><Plus size={16} /> Nuevo barbero</button>} /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{barbers.map((item) => <div className="rounded border border-[#c9a84c]/20 bg-[#1a1916] p-5" key={item.id}><div className="flex items-start justify-between"><div className={`grid h-14 w-14 place-items-center rounded-full ${item.color} font-serif text-lg`}>{item.initials}</div><div className="flex gap-2"><button onClick={() => setModal({ type: 'barber', item })} className="icon-button"><Edit3 size={15} /></button><button onClick={() => setModal({ type: 'delete-barber', item })} className="icon-button danger"><Trash2 size={15} /></button></div></div><h3 className="mt-5 font-serif text-2xl">{item.name}</h3><p className="mt-1 text-sm text-[#c9a84c]">{item.specialty}</p></div>)}</div></>}
     {tab === 'Horarios' && <><SectionHeader title="Horarios" text="Configura la disponibilidad general de la barbería." /><div className="max-w-2xl rounded border border-[#c9a84c]/20 bg-[#1a1916] p-6"><h2 className="font-serif text-2xl">Días de atención</h2><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day, index) => <button key={day} onClick={() => setSchedule({ ...schedule, days: schedule.days.map((x, n) => n === index ? !x : x) })} className={`day-button ${schedule.days[index] ? 'active' : ''}`}>{day}<span>{schedule.days[index] ? 'Abierto' : 'Cerrado'}</span></button>)}</div><div className="mt-8 grid gap-4 sm:grid-cols-2"><label className="form-label">Apertura<input type="time" value={schedule.start} onChange={(e) => setSchedule({ ...schedule, start: e.target.value })} className="dark-input" /></label><label className="form-label">Cierre<input type="time" value={schedule.end} onChange={(e) => setSchedule({ ...schedule, end: e.target.value })} className="dark-input" /></label></div><button className="gold-button mt-7">Guardar horarios <Check size={16} /></button></div></>}
   </div>{modal && <EntityModal modal={modal} setModal={setModal} onSave={save} onDelete={remove} />}</div>
@@ -80,6 +82,25 @@ export default function App() {
   const [booking, setBooking] = useState({ service: null, date: bookingDates.find((date) => !isSunday(date)), time: null, name: '', phone: '' })
   const [success, setSuccess] = useState(false)
   const [session, setSession] = useState(null)
+  const [occupiedTimes, setOccupiedTimes] = useState([])
+
+  const loadCatalog = async () => {
+    if (!supabase) return
+    const [{ data: serviceRows }, { data: barberRows }] = await Promise.all([
+      supabase.from('services').select('*').order('name'),
+      supabase.from('barbers').select('*').order('name'),
+    ])
+    if (serviceRows) setServices(serviceRows.map(toService))
+    if (barberRows) setBarbers(barberRows.map(toBarber))
+  }
+  const loadOccupiedTimes = async (date) => {
+    if (!supabase) {
+      setOccupiedTimes(appointments.filter((item) => item.date === date && item.status !== 'cancelada').map((item) => item.time))
+      return
+    }
+    const { data } = await supabase.rpc('booked_appointment_times', { selected_date: date })
+    setOccupiedTimes((data || []).map((item) => item.appointment_time))
+  }
 
   const loadAppointments = async () => {
     if (!supabase) return
@@ -96,7 +117,8 @@ export default function App() {
       barber: appointment.barber, appointment_date: appointment.date, appointment_time: appointment.time,
       status: appointment.status, price: appointment.price,
     }).select().single()
-    if (error) { window.alert('No fue posible guardar tu cita. Inténtalo de nuevo.'); return null }
+    if (error) { window.alert('Este horario acaba de ser reservado. Elige otro para continuar.'); await loadOccupiedTimes(appointment.date); return null }
+    await loadOccupiedTimes(appointment.date)
     return toAppointment(data)
   }
   const updateAppointment = async (id, status) => {
@@ -104,15 +126,32 @@ export default function App() {
     const { data, error } = await supabase.from('appointments').update({ status }).eq('id', id).select().single()
     if (!error) setAppointments((items) => items.map((item) => item.id === id ? toAppointment(data) : item))
   }
+  const saveCatalogItem = async (type, item) => {
+    if (!supabase) return { ...item, id: item.id || Date.now() }
+    const table = type === 'service' ? 'services' : 'barbers'
+    const payload = type === 'service' ? { name: item.name, price: item.price, duration: item.duration, active: item.active } : { name: item.name, specialty: item.specialty, initials: item.initials, color: item.color }
+    const query = item.id ? supabase.from(table).update(payload).eq('id', item.id) : supabase.from(table).insert(payload)
+    const { data, error } = await query.select().single()
+    if (error) { window.alert('No fue posible guardar los cambios.'); return null }
+    return type === 'service' ? toService(data) : toBarber(data)
+  }
+  const deleteCatalogItem = async (type, id) => {
+    if (!supabase) return true
+    const { error } = await supabase.from(type === 'service' ? 'services' : 'barbers').delete().eq('id', id)
+    if (error) { window.alert('No fue posible eliminar el registro.'); return false }
+    return true
+  }
 
   useEffect(() => {
     if (!supabase) return undefined
+    loadCatalog()
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
     return () => listener.subscription.unsubscribe()
   }, [])
   useEffect(() => { if (session) loadAppointments() }, [session])
+  useEffect(() => { loadOccupiedTimes(booking.date) }, [booking.date])
 
   const leaveAdmin = async () => { if (supabase) await supabase.auth.signOut(); setView('public') }
-  return <main className="min-h-screen bg-[#0f0e0c] text-[#f5f5f5] antialiased">{view === 'public' ? <PublicBooking {...{ services, barbers, step, setStep, booking, setBooking, success, setSuccess, setAppointments, saveAppointment }} /> : session ? <AdminPanel {...{ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment }} /> : <AdminLogin onAccess={() => setView('admin')} />}<button onClick={() => view === 'public' ? setView('admin-login') : leaveAdmin()} className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full border border-[#c9a84c]/40 bg-[#1a1916] px-4 py-3 text-sm font-semibold text-[#c9a84c] shadow-2xl transition hover:bg-[#c9a84c] hover:text-[#0f0e0c]">{view === 'public' ? <LayoutDashboard size={17} /> : <Scissors size={17} />}{view === 'public' ? 'Panel admin' : 'Vista cliente'}</button></main>
+  return <main className="min-h-screen bg-[#0f0e0c] text-[#f5f5f5] antialiased">{view === 'public' ? <PublicBooking {...{ services, barbers, step, setStep, booking, setBooking, success, setSuccess, saveAppointment, occupiedTimes }} /> : session ? <AdminPanel {...{ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment, saveCatalogItem, deleteCatalogItem }} /> : <AdminLogin onAccess={() => setView('admin')} />}<button onClick={() => view === 'public' ? setView('admin-login') : leaveAdmin()} className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full border border-[#c9a84c]/40 bg-[#1a1916] px-4 py-3 text-sm font-semibold text-[#c9a84c] shadow-2xl transition hover:bg-[#c9a84c] hover:text-[#0f0e0c]">{view === 'public' ? <LayoutDashboard size={17} /> : <Scissors size={17} />}{view === 'public' ? 'Panel admin' : 'Vista cliente'}</button></main>
 }
