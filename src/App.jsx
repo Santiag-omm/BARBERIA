@@ -113,14 +113,18 @@ export default function App() {
       setAppointments((items) => [appointment, ...items])
       return appointment
     }
-    const { data, error } = await supabase.from('appointments').insert({
+    const { error } = await supabase.from('appointments').insert({
       client_name: appointment.client, phone: appointment.phone, service: appointment.service,
       barber: appointment.barber, appointment_date: appointment.date, appointment_time: appointment.time,
       status: appointment.status, price: appointment.price,
-    }).select().single()
-    if (error) { window.alert('Este horario acaba de ser reservado. Elige otro para continuar.'); await loadOccupiedTimes(appointment.date); return null }
+    })
+    if (error) {
+      window.alert(error.code === '23505' ? 'Este horario acaba de ser reservado. Elige otro para continuar.' : 'No fue posible guardar tu cita. Inténtalo de nuevo.')
+      await loadOccupiedTimes(appointment.date)
+      return null
+    }
     await loadOccupiedTimes(appointment.date)
-    return toAppointment(data)
+    return appointment
   }
   const updateAppointment = async (id, status) => {
     if (!supabase) { setAppointments((items) => items.map((item) => item.id === id ? { ...item, status } : item)); return }
