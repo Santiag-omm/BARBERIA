@@ -46,8 +46,11 @@ create table if not exists public.barbers (
   name text not null,
   specialty text not null,
   initials text not null,
-  color text not null default 'bg-amber-700'
+  color text not null default 'bg-amber-700',
+  is_apprentice boolean not null default false
 );
+
+alter table public.barbers add column if not exists is_apprentice boolean not null default false;
 
 alter table public.services enable row level security;
 alter table public.barbers enable row level security;
