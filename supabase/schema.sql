@@ -63,14 +63,15 @@ create policy "Staff manage barbers" on public.barbers for all to authenticated 
 
 -- El formulario público solo recibe horas reservadas, nunca datos de clientes.
 create or replace function public.booked_appointment_times(selected_date date)
-returns table(appointment_time text)
+returns table(appointment_time text, duration integer)
 language sql
 security definer
 set search_path = public
 as $$
-  select appointment_time
-  from public.appointments
-  where appointment_date = selected_date and status <> 'cancelada';
+  select a.appointment_time, coalesce(s.duration, 30)
+  from public.appointments a
+  left join public.services s on s.name = a.service
+  where a.appointment_date = selected_date and a.status <> 'cancelada';
 $$;
 
 grant execute on function public.booked_appointment_times(date) to anon, authenticated;
