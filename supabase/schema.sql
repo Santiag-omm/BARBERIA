@@ -65,6 +65,7 @@ create policy "Public reads barbers" on public.barbers for select using (true);
 create policy "Staff manage barbers" on public.barbers for all to authenticated using (true) with check (true);
 
 -- El formulario público solo recibe horas reservadas, nunca datos de clientes.
+drop function if exists public.booked_appointment_times(date);
 create or replace function public.booked_appointment_times(selected_date date)
 returns table(appointment_time text, duration integer)
 language sql
