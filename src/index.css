@@ -38,6 +38,7 @@ table { width:100%; min-width:700px; border-collapse:collapse; text-align:left; 
 @keyframes appear { from { opacity:0; transform:translateY(12px) scale(.98); } to { opacity:1; transform:none; } } @keyframes pop { 0% { transform:scale(.3); opacity:0; } 70% { transform:scale(1.1); } 100% { transform:scale(1); opacity:1; } } @keyframes calendar-enter { from { opacity:0; transform:translateX(12px); } to { opacity:1; transform:translateX(0); } }
 .hide-scrollbar::-webkit-scrollbar { display:none; }
 @media (max-width:640px) {
+	body { overflow-x:hidden; }
 	.modal { padding:1.5rem; }
 	.service-card { align-items:flex-start; gap:1rem; padding:1rem; }
 	.list-card { align-items:flex-start; flex-direction:column; }
@@ -46,6 +47,12 @@ table { width:100%; min-width:700px; border-collapse:collapse; text-align:left; 
 	.admin-tab.active { background:rgba(201,168,76,.1); border-color:#c9a84c; }
 	.gold-button { min-height:2.75rem; }
 	.time-slot { min-height:2.7rem; }
-	.calendar-day { min-height:3.75rem; }
-	.calendar-weekdays { font-size:.58rem; }
+	.calendar-header { align-items:stretch; flex-direction:column; gap:.75rem; }
+	.calendar-controls { justify-content:space-between; gap:.5rem; }
+	.calendar-controls h3 { min-width:0; font-size:1.1rem; }
+	.calendar-weekdays, .calendar-grid { gap:.2rem; }
+	.calendar-weekdays { font-size:.55rem; }
+	.calendar-day { min-height:3.35rem; }
+	.calendar-day strong { font-size:.9rem; }
+	.calendar-day span { max-width:100%; overflow:hidden; font-size:.5rem; text-overflow:ellipsis; white-space:nowrap; }
 }
