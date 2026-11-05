@@ -10,10 +10,13 @@ npm run dev
 ## Proteger el panel administrativo
 
 1. Crea un proyecto en [Supabase](https://supabase.com) y habilita el proveedor **Email** en Authentication.
-2. En **Authentication > Users**, crea el usuario administrador con email y contraseña.
-3. Copia `.env.example` como `.env.local` y completa `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` desde **Project Settings > API**.
-4. En Supabase, configura la URL de producción y las redirect URLs autorizadas en **Authentication > URL Configuration**.
-5. En Vercel, añade las mismas variables de entorno en **Settings > Environment Variables** y vuelve a desplegar.
+2. Ejecuta `supabase/schema.sql` en **SQL Editor > New query** para crear las tablas, políticas y funciones de reservas.
+3. En **Authentication > Users**, crea el usuario administrador con email y contraseña.
+4. Copia `.env.example` como `.env.local` y completa `VITE_SUPABASE_URL` y `VITE_SUPABASE_ANON_KEY` desde **Project Settings > API**.
+5. En Supabase, configura la URL de producción y las redirect URLs autorizadas en **Authentication > URL Configuration**.
+6. En Vercel, añade las mismas variables de entorno en **Settings > Environment Variables** y vuelve a desplegar.
+
+Al cambiar la lógica de disponibilidad o configuración de reservas, vuelve a ejecutar `supabase/schema.sql` para aplicar las actualizaciones de base de datos.
 
 La clave `anon` puede estar en el navegador; no incluyas una `service_role` en Vercel ni en archivos frontend. La seguridad de los datos debe aplicarse con políticas RLS de Supabase cuando se conecte una base de datos.# React + Vite
 

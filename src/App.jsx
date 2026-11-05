@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarDays, Check, ChevronLeft, ChevronRight, Clock3, Edit3, LayoutDashboard, LockKeyhole, Plus, Scissors, Settings2, Trash2, Users, X } from 'lucide-react'
 import { isSupabaseConfigured, supabase } from './supabase'
 
@@ -31,9 +31,14 @@ const requiredSlots = (time, duration) => {
   if (!Number.isFinite(start)) return [time]
   return [time, ...times.filter((slot) => slot !== time && toMinutes(slot) > start && toMinutes(slot) < start + duration)]
 }
-const dateValue = (date) => date.toLocaleDateString('en-CA')
+const dateValue = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 const todayValue = dateValue(new Date())
 const bookingDates = Array.from({ length: 14 }, (_, index) => { const date = new Date(); date.setHours(12, 0, 0, 0); date.setDate(date.getDate() + index); return dateValue(date) })
+const addMonths = (date, months) => {
+  const result = new Date(date.getFullYear(), date.getMonth() + months, 1)
+  result.setDate(Math.min(date.getDate(), new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate()))
+  return result
+}
 const calendarWeekdays = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
 const monthLabel = new Intl.DateTimeFormat('es-MX', { month: 'long', year: 'numeric' })
 const monthDates = (year, month) => {
@@ -51,7 +56,7 @@ function Brand() {
 function StepTitle({ eyebrow, title, description }) {
   return <div className="mb-7"><p className="text-xs font-bold uppercase tracking-[.2em] text-[#c9a84c]">{eyebrow}</p><h2 className="mt-2 font-serif text-3xl">{title}</h2><p className="mt-2 text-sm text-[#a0a0a0]">{description}</p></div>
 }
-function PublicBooking({ services, barbers, step, setStep, booking, setBooking, success, setSuccess, saveAppointment, occupiedTimes, onAdminOpen }) {
+function PublicBooking({ services, barbers, step, setStep, booking, setBooking, success, setSuccess, saveAppointment, occupiedTimes, availabilityLoading, availabilityError, bookingSettings, closedDates, onAdminOpen }) {
   const selectedService = services.find((item) => item.id === booking.service)
   const needsBarberChoice = barbers.length > 1
   const selectedBarber = needsBarberChoice ? barbers.find((item) => item.id === booking.barber) : barbers[0]
@@ -63,15 +68,17 @@ function PublicBooking({ services, barbers, step, setStep, booking, setBooking, 
   const occupied = occupiedTimes
   const isWalkInDay = booking.date && isSaturday(booking.date)
   const isTodaySelected = booking.date === todayValue
+  const maxBookingDate = dateValue(addMonths(new Date(`${todayValue}T12:00:00`), bookingSettings.limitMonths ? bookingSettings.maxMonths : 12))
   const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
   const pastTimes = isTodaySelected ? times.filter((time) => toMinutes(time) <= nowMinutes) : []
   const serviceDuration = selectedService?.duration || 30
   const isTimeDisabled = (time) => pastTimes.includes(time) || requiredSlots(time, serviceDuration).some((slot) => occupied.includes(slot))
   const availableTimes = times.filter((time) => !isTimeDisabled(time))
-  const noTimesLeftToday = isTodaySelected && !isWalkInDay && availableTimes.length === 0
-  const canContinue = step === 1 ? booking.service && (!needsBarberChoice || booking.barber) : step === 2 ? booking.date && !isSunday(booking.date) && (isWalkInDay || booking.time) : step === 3 ? booking.name.trim() && /^\d{10}$/.test(booking.phone) : true
+  const noTimesLeftToday = isTodaySelected && !isWalkInDay && !availabilityLoading && !availabilityError && availableTimes.length === 0
+  const canContinue = step === 1 ? booking.service && (!needsBarberChoice || booking.barber) : step === 2 ? booking.date && !isSunday(booking.date) && !closedDates.includes(booking.date) && (isWalkInDay || (!availabilityLoading && !availabilityError && booking.time && !isTimeDisabled(booking.time))) : step === 3 ? booking.name.trim() && /^\d{10}$/.test(booking.phone) : true
   const calendarDates = monthDates(visibleMonth.getFullYear(), visibleMonth.getMonth())
   const isCurrentMonth = visibleMonth.getFullYear() === new Date().getFullYear() && visibleMonth.getMonth() === new Date().getMonth()
+  const isLastMonth = visibleMonth.getFullYear() === new Date(`${maxBookingDate}T12:00:00`).getFullYear() && visibleMonth.getMonth() === new Date(`${maxBookingDate}T12:00:00`).getMonth()
   const changeMonth = (amount) => setVisibleMonth((currentMonth) => new Date(currentMonth.getFullYear(), currentMonth.getMonth() + amount, 1))
   const confirm = async () => {
     const appointmentBarber = selectedBarber || barbers[0]
@@ -83,7 +90,7 @@ function PublicBooking({ services, barbers, step, setStep, booking, setBooking, 
     <section className="py-10"><p className="mb-2 text-center text-xs font-bold uppercase tracking-[.2em] text-[#c9a84c]">Agenda en línea</p><h1 className="text-center font-serif text-4xl sm:text-5xl">Tu próximo corte empieza aquí.</h1><div className="mx-auto mt-10 flex max-w-3xl items-start justify-between">{steps.map((label, index) => <button key={label} onClick={() => index + 1 < step && setStep(index + 1)} className="relative flex flex-1 flex-col items-center gap-2"><span className={`grid h-8 w-8 place-items-center rounded-full border text-xs ${step >= index + 1 ? 'border-[#c9a84c] bg-[#c9a84c] text-[#0f0e0c]' : 'border-[#c9a84c]/25 text-[#a0a0a0]'}`}>{step > index + 1 ? <Check size={15} /> : index + 1}</span>{index < 4 && <i className={`absolute left-[60%] top-4 h-px w-[80%] ${step > index + 1 ? 'bg-[#c9a84c]' : 'bg-[#c9a84c]/20'}`} />}<span className="hidden text-[10px] uppercase tracking-wider text-[#a0a0a0] sm:block">{label}</span></button>)}</div></section>
     <section className="mx-auto max-w-4xl rounded-lg border border-[#c9a84c]/20 bg-[#1a1916] p-6 shadow-2xl sm:p-10">
       {step === 1 && <><StepTitle eyebrow="Paso 01" title="Elige tu servicio" description="Cada detalle cuenta. Selecciona tu experiencia." /><div className="grid gap-3 sm:grid-cols-2">{services.filter((item) => item.active).map((item) => <button key={item.id} onClick={() => setBooking({ ...booking, service: item.id })} className={`service-card text-left ${booking.service === item.id ? 'selected' : ''}`}><div><h3 className="font-serif text-xl">{item.name}</h3><p className="mt-2 flex items-center gap-1 text-xs text-[#a0a0a0]"><Clock3 size={13} /> {item.duration} min.</p></div><strong className="text-lg text-[#c9a84c]">{currency.format(item.price)}</strong></button>)}</div>{needsBarberChoice && <><p className="mb-3 mt-7 text-sm font-semibold">Elige tu barbero</p><div className="grid gap-3 sm:grid-cols-2">{barbers.map((item) => <button key={item.id} onClick={() => setBooking({ ...booking, barber: item.id })} className={`service-card text-left ${booking.barber === item.id ? 'selected' : ''}`}><div className="flex items-center gap-3"><div className={`grid h-11 w-11 shrink-0 place-items-center rounded-full ${item.color} font-serif text-sm`}>{item.initials}</div><div><h3 className="font-serif text-lg">{item.name}</h3><p className="text-xs text-[#a0a0a0]">{item.specialty}</p></div></div>{item.isApprentice && <span className="mt-3 inline-block rounded-full border border-[#c9a84c]/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#c9a84c]">Aprendiz</span>}</button>)}</div></>}</>}
-      {step === 2 && <><StepTitle eyebrow="Paso 02" title="Elige fecha y hora" description="Disponibilidad actualizada al momento. Los domingos permanecemos cerrados y los sábados se atiende por orden de llegada." /><div className="mb-7"><div className="calendar-header mb-4 flex items-center justify-between"><p className="text-sm font-semibold">Fecha</p><div className="calendar-controls flex items-center gap-3"><button disabled={isCurrentMonth} onClick={() => changeMonth(-1)} className="calendar-nav" title="Mes anterior"><ChevronLeft size={17} /></button><h3 className="min-w-40 text-center font-serif text-xl capitalize">{monthLabel.format(visibleMonth)}</h3><button onClick={() => changeMonth(1)} className="calendar-nav" title="Mes siguiente"><ChevronRight size={17} /></button></div></div><div className="calendar-weekdays">{calendarWeekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}</div><div key={`${visibleMonth.getFullYear()}-${visibleMonth.getMonth()}`} className="calendar-grid">{calendarDates.map((date, index) => { if (!date) return <span key={`empty-${index}`} aria-hidden="true" />; const closed = isSunday(date); const walkIn = isSaturday(date); const past = date < todayValue; const disabled = closed || past; return <button disabled={disabled} key={date} onClick={() => setBooking({ ...booking, date, time: null })} className={`calendar-day ${booking.date === date ? 'selected' : ''} ${disabled ? 'disabled' : ''} ${walkIn ? 'walk-in' : ''}`}><strong>{new Date(`${date}T12:00:00`).getDate()}</strong>{closed ? <span>Cerrado</span> : walkIn ? <span>Sin cita</span> : null}</button> })}</div><p className="mt-4 text-xs text-[#a0a0a0]">Los sábados se atiende sin cita y los domingos permanecemos cerrados.</p></div><p className="mb-3 text-sm font-semibold">Horarios disponibles</p>{isWalkInDay ? <div className="rounded border border-[#c9a84c]/30 bg-[#c9a84c]/10 p-4 text-sm text-[#c9a84c]">Los sábados no es necesario reservar hora: te atendemos por orden de llegada. Preséntate directamente en la barbería.</div> : <><div className="grid grid-cols-3 gap-2 sm:grid-cols-4">{times.map((time) => { const disabled = isTimeDisabled(time); return <button disabled={disabled} key={time} onClick={() => setBooking({ ...booking, time })} className={`time-slot ${booking.time === time ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}>{time}</button> })}</div>{serviceDuration > 30 && <p className="mt-3 text-xs text-[#a0a0a0]">Este servicio dura más de 30 min, por lo que también ocupa el turno siguiente.</p>}{noTimesLeftToday && <p className="mt-3 text-xs text-[#a0a0a0]">Ya no quedan horarios disponibles por hoy. Elige otra fecha.</p>}</>}</>}
+      {step === 2 && <><StepTitle eyebrow="Paso 02" title="Elige fecha y hora" description="Disponibilidad actualizada al momento. Los domingos permanecemos cerrados y los sábados se atiende por orden de llegada." /><div className="mb-7"><div className="calendar-header mb-4 flex items-center justify-between"><p className="text-sm font-semibold">Fecha</p><div className="calendar-controls flex items-center gap-3"><button disabled={isCurrentMonth} onClick={() => changeMonth(-1)} className="calendar-nav" title="Mes anterior"><ChevronLeft size={17} /></button><h3 className="min-w-40 text-center font-serif text-xl capitalize">{monthLabel.format(visibleMonth)}</h3><button disabled={isLastMonth} onClick={() => changeMonth(1)} className="calendar-nav" title="Mes siguiente"><ChevronRight size={17} /></button></div></div><div className="calendar-weekdays">{calendarWeekdays.map((weekday) => <span key={weekday}>{weekday}</span>)}</div><div key={`${visibleMonth.getFullYear()}-${visibleMonth.getMonth()}`} className="calendar-grid">{calendarDates.map((date, index) => { if (!date) return <span key={`empty-${index}`} aria-hidden="true" />; const closed = isSunday(date); const walkIn = isSaturday(date); const past = date < todayValue; const beyondLimit = date > maxBookingDate; const isClosedDate = closedDates.includes(date); const disabled = closed || past || beyondLimit || isClosedDate; return <button disabled={disabled} key={date} onClick={() => setBooking({ ...booking, date, time: null })} className={`calendar-day ${booking.date === date ? 'selected' : ''} ${disabled ? 'disabled' : ''} ${walkIn ? 'walk-in' : ''}`}><strong>{new Date(`${date}T12:00:00`).getDate()}</strong>{closed || isClosedDate ? <span>Cerrado</span> : walkIn ? <span>Sin cita</span> : null}</button> })}</div><p className="mt-4 text-xs text-[#a0a0a0]">Los sábados se atiende sin cita y los domingos permanecemos cerrados.{bookingSettings.limitMonths ? ` Puedes reservar hasta ${bookingSettings.maxMonths} ${bookingSettings.maxMonths === 1 ? 'mes' : 'meses'} de anticipación.` : ''}</p></div><p className="mb-3 text-sm font-semibold">Horarios disponibles</p>{isWalkInDay ? <div className="rounded border border-[#c9a84c]/30 bg-[#c9a84c]/10 p-4 text-sm text-[#c9a84c]">Los sábados no es necesario reservar hora: te atendemos por orden de llegada. Preséntate directamente en la barbería.</div> : <><div className="grid grid-cols-3 gap-2 sm:grid-cols-4">{times.map((time) => { const disabled = availabilityLoading || Boolean(availabilityError) || isTimeDisabled(time); return <button disabled={disabled} key={time} onClick={() => setBooking({ ...booking, time })} className={`time-slot ${booking.time === time ? 'selected' : ''} ${disabled ? 'disabled' : ''}`}>{time}</button> })}</div>{availabilityLoading && <p className="mt-3 text-xs text-[#a0a0a0]">Consultando disponibilidad...</p>}{availabilityError && <p className="mt-3 text-xs text-red-400">{availabilityError}</p>}{serviceDuration > 30 && <p className="mt-3 text-xs text-[#a0a0a0]">Este servicio dura más de 30 min, por lo que también ocupa el turno siguiente.</p>}{noTimesLeftToday && <p className="mt-3 text-xs text-[#a0a0a0]">Ya no quedan horarios disponibles por hoy. Elige otra fecha.</p>}</>}</>}
       {step === 3 && <><StepTitle eyebrow="Paso 03" title="Tus datos" description="Usaremos esta información solo para tu reserva." /><div className="grid gap-5"><label className="form-label">Nombre completo<input value={booking.name} onChange={(event) => setBooking({ ...booking, name: event.target.value })} placeholder="Tu nombre" className="dark-input" /></label><label className="form-label">Teléfono (10 dígitos)<input value={booking.phone} onChange={(event) => setBooking({ ...booking, phone: event.target.value.replace(/\D/g, '').slice(0, 10) })} placeholder="55 0000 0000" inputMode="numeric" className="dark-input" />{booking.phone && booking.phone.length < 10 && <span className="text-xs text-red-400">Ingresa exactamente 10 dígitos.</span>}</label></div></>}
       {step === 4 && <><StepTitle eyebrow="Paso 04" title="Revisa tu cita" description="Todo listo para que disfrutes la experiencia." /><div className="divide-y divide-[#c9a84c]/15 rounded border border-[#c9a84c]/20 bg-[#0f0e0c]/40 px-5">{[['Servicio', selectedService?.name], ['Barbero', selectedBarber ? `${selectedBarber.name}${selectedBarber.isApprentice ? ' (Aprendiz)' : ''}` : ''], ['Fecha', dateLabel(booking.date)], ['Hora', isWalkInDay ? walkInLabel : booking.time], ['Cliente', booking.name], ['Total', currency.format(selectedService?.price || 0)]].map(([label, value]) => <div key={label} className="flex justify-between gap-6 py-4 text-sm"><span className="text-[#a0a0a0]">{label}</span><strong className={label === 'Total' ? 'text-[#c9a84c]' : ''}>{value}</strong></div>)}</div></>}
       <div className="mt-10 flex items-center justify-between border-t border-[#c9a84c]/15 pt-6"><button onClick={() => setStep(Math.max(1, step - 1))} className={`flex items-center gap-1 text-sm text-[#a0a0a0] ${step === 1 ? 'invisible' : ''}`}><ChevronLeft size={16} /> Volver</button>{step === 4 ? <button onClick={confirm} className="gold-button">Confirmar cita <Check size={17} /></button> : <button disabled={!canContinue} onClick={() => canContinue && setStep(step + 1)} className="gold-button disabled:cursor-not-allowed disabled:opacity-30">Continuar <ChevronRight size={17} /></button>}</div>
@@ -91,17 +98,19 @@ function PublicBooking({ services, barbers, step, setStep, booking, setBooking, 
 }
 function SectionHeader({ title, text, action }) { return <div className="mb-7 flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.2em] text-[#c9a84c]">Administración</p><h1 className="mt-2 font-serif text-3xl">{title}</h1><p className="mt-1 text-sm text-[#a0a0a0]">{text}</p></div>{action}</div> }
 function StatusBadge({ status }) { return <span className={`status ${status}`}>{status}</span> }
-function AdminPanel({ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment, saveCatalogItem, deleteCatalogItem, clearCancelledAppointments, deleteAppointment, onExit }) {
-  const [tab, setTab] = useState('Dashboard'); const [statusFilter, setStatusFilter] = useState('todas'); const [modal, setModal] = useState(null); const [schedule, setSchedule] = useState({ start: '10:00', end: '20:00', days: [true, true, true, true, true, true, false] })
+function AdminPanel({ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment, saveCatalogItem, deleteCatalogItem, clearCancelledAppointments, deleteAppointment, bookingSettings, setBookingSettings, saveBookingSettings, closedDates, addClosedDate, removeClosedDate, onExit }) {
+  const [tab, setTab] = useState('Dashboard'); const [statusFilter, setStatusFilter] = useState('todas'); const [modal, setModal] = useState(null); const [schedule, setSchedule] = useState({ start: '10:00', end: '20:00', days: [true, true, true, true, true, true, false] }); const [closedDateDraft, setClosedDateDraft] = useState('')
   const tabs = [['Dashboard', LayoutDashboard], ['Citas', CalendarDays], ['Servicios', Scissors], ['Barberos', Users], ['Horarios', Settings2]]
   const save = async (event) => { event.preventDefault(); const form = new FormData(event.currentTarget); const type = modal.type; const item = type === 'service' ? { id: modal.item?.id, name: form.get('name'), price: Number(form.get('price')), duration: Number(form.get('duration')), active: modal.item?.active ?? true } : { id: modal.item?.id, name: form.get('name'), specialty: form.get('specialty'), initials: form.get('name').split(' ').map((part) => part[0]).join('').slice(0, 2), color: modal.item?.color || 'bg-amber-700', isApprentice: form.get('isApprentice') === 'on' }; const savedItem = await saveCatalogItem(type, item); if (!savedItem) return; if (type === 'service') setServices((items) => modal.item ? items.map((current) => current.id === savedItem.id ? savedItem : current) : [...items, savedItem]); else setBarbers((items) => modal.item ? items.map((current) => current.id === savedItem.id ? savedItem : current) : [...items, savedItem]); setModal(null) }
   const remove = async () => { if (modal.type === 'appointment') await updateAppointment(modal.item.id, 'cancelada'); if (modal.type === 'delete-appointment') await deleteAppointment(modal.item.id); if (modal.type === 'delete-service') { if (await deleteCatalogItem('service', modal.item.id)) setServices((items) => items.filter((item) => item.id !== modal.item.id)) } if (modal.type === 'delete-barber') { if (await deleteCatalogItem('barber', modal.item.id)) setBarbers((items) => items.filter((item) => item.id !== modal.item.id)) } setModal(null) }
+  const submitBookingSettings = async (event) => { event.preventDefault(); await saveBookingSettings(bookingSettings) }
+  const submitClosedDate = async (event) => { event.preventDefault(); if (!closedDateDraft || closedDates.includes(closedDateDraft)) return; if (await addClosedDate(closedDateDraft)) setClosedDateDraft('') }
   return <div className="min-h-screen"><header className="border-b border-[#c9a84c]/20 bg-[#1a1916]"><div className="mx-auto flex max-w-7xl flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:gap-6 sm:py-5"><div className="flex items-center justify-between gap-3 sm:contents"><Brand /><button onClick={onExit} className="header-action sm:order-3"><Scissors size={16} /> Vista cliente</button></div><nav aria-label="Secciones administrativas" className="grid w-full grid-cols-2 gap-1 sm:order-2 sm:flex sm:w-auto sm:flex-1 sm:gap-1 sm:overflow-x-auto">{tabs.map(([name, Icon]) => <button key={name} onClick={() => setTab(name)} className={`admin-tab ${tab === name ? 'active' : ''}`}><Icon size={16} /> {name}</button>)}</nav></div></header><div className="mx-auto max-w-7xl px-4 py-6 sm:px-5 sm:py-9">
     {tab === 'Dashboard' && <Dashboard appointments={appointments} />}
-    {tab === 'Citas' && <><SectionHeader title="Citas" text="Organiza y administra el calendario de reservas." action={appointments.some((item) => item.status === 'cancelada') && <button onClick={clearCancelledAppointments} className="icon-button danger flex items-center gap-2 px-3"><Trash2 size={15} /> Limpiar canceladas</button>} /><div className="mb-5 flex flex-wrap gap-2">{['todas', 'pendiente', 'confirmada', 'completada', 'cancelada'].map((status) => <button key={status} onClick={() => setStatusFilter(status)} className={`filter ${statusFilter === status ? 'active' : ''}`}>{status}</button>)}</div><div className="overflow-x-auto rounded border border-[#c9a84c]/20 bg-[#1a1916]"><table><thead><tr><th>Cliente</th><th>Servicio</th><th>Fecha</th><th>Estado</th><th></th></tr></thead><tbody>{appointments.filter((item) => statusFilter === 'todas' || item.status === statusFilter).map((item) => <tr key={item.id}><td><strong>{item.client}</strong></td><td>{item.service}<span>{item.barber}</span></td><td>{dateLabel(item.date)}<span>{item.time} h</span></td><td><StatusBadge status={item.status} /></td><td><div className="flex gap-2">{['pendiente', 'confirmada'].includes(item.status) && <button onClick={() => updateAppointment(item.id, item.status === 'pendiente' ? 'confirmada' : 'completada')} className="icon-button" title={item.status === 'pendiente' ? 'Confirmar cita' : 'Marcar como completada'}><Check size={15} /></button>}{item.status === 'completada' ? <button onClick={() => setModal({ type: 'delete-appointment', item })} className="icon-button danger" title="Eliminar"><Trash2 size={15} /></button> : item.status !== 'cancelada' && <button onClick={() => setModal({ type: 'appointment', item })} className="icon-button danger" title="Cancelar cita"><X size={15} /></button>}</div></td></tr>)}</tbody></table></div></>}
+    {tab === 'Citas' && <><SectionHeader title="Citas" text="Organiza y administra el calendario de reservas." action={appointments.some((item) => item.status === 'cancelada') && <button onClick={clearCancelledAppointments} className="icon-button danger flex items-center gap-2 px-3"><Trash2 size={15} /> Limpiar canceladas</button>} /><div className="mb-5 flex flex-wrap gap-2">{['todas', 'pendiente', 'confirmada', 'completada', 'cancelada'].map((status) => <button key={status} onClick={() => setStatusFilter(status)} className={`filter ${statusFilter === status ? 'active' : ''}`}>{status}</button>)}</div><div className="overflow-x-auto rounded border border-[#c9a84c]/20 bg-[#1a1916]"><table><thead><tr><th>Cliente</th><th>Servicio</th><th>Fecha</th><th>Estado</th><th></th></tr></thead><tbody>{appointments.filter((item) => statusFilter === 'todas' || item.status === statusFilter).map((item) => <tr key={item.id}><td><strong>{item.client}</strong><span>{item.phone || 'Sin teléfono registrado'}</span></td><td>{item.service}<span>{item.barber}</span></td><td>{dateLabel(item.date)}<span>{item.time} h</span></td><td><StatusBadge status={item.status} /></td><td><div className="flex gap-2">{['pendiente', 'confirmada'].includes(item.status) && <button onClick={() => updateAppointment(item.id, item.status === 'pendiente' ? 'confirmada' : 'completada')} className="icon-button" title={item.status === 'pendiente' ? 'Confirmar cita' : 'Marcar como completada'}><Check size={15} /></button>}{item.status === 'completada' ? <button onClick={() => setModal({ type: 'delete-appointment', item })} className="icon-button danger" title="Eliminar"><Trash2 size={15} /></button> : item.status !== 'cancelada' && <button onClick={() => setModal({ type: 'appointment', item })} className="icon-button danger" title="Cancelar cita"><X size={15} /></button>}</div></td></tr>)}</tbody></table></div></>}
     {tab === 'Servicios' && <><SectionHeader title="Servicios" text="Catálogo y disponibilidad de tus experiencias." action={<button onClick={() => setModal({ type: 'service' })} className="gold-button"><Plus size={16} /> Nuevo servicio</button>} /><div className="grid gap-3 md:grid-cols-2">{services.map((item) => <div className="list-card" key={item.id}><div><h3 className="font-serif text-xl">{item.name}</h3><p className="mt-1 text-sm text-[#a0a0a0]">{currency.format(item.price)} · {item.duration} min.</p></div><div className="flex items-center gap-2"><button onClick={async () => { const savedItem = await saveCatalogItem('service', { ...item, active: !item.active }); if (savedItem) setServices((items) => items.map((current) => current.id === savedItem.id ? savedItem : current)) }} className={`switch ${item.active ? 'on' : ''}`}><span /></button><button onClick={() => setModal({ type: 'service', item })} className="icon-button"><Edit3 size={15} /></button><button onClick={() => setModal({ type: 'delete-service', item })} className="icon-button danger"><Trash2 size={15} /></button></div></div>)}</div></>}
     {tab === 'Barberos' && <><SectionHeader title="Barberos" text="Administra el equipo y sus especialidades." action={<button onClick={() => setModal({ type: 'barber' })} className="gold-button"><Plus size={16} /> Nuevo barbero</button>} /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{barbers.map((item) => <div className="rounded border border-[#c9a84c]/20 bg-[#1a1916] p-5" key={item.id}><div className="flex items-start justify-between"><div className={`grid h-14 w-14 place-items-center rounded-full ${item.color} font-serif text-lg`}>{item.initials}</div><div className="flex gap-2"><button onClick={() => setModal({ type: 'barber', item })} className="icon-button"><Edit3 size={15} /></button><button onClick={() => setModal({ type: 'delete-barber', item })} className="icon-button danger"><Trash2 size={15} /></button></div></div><h3 className="mt-5 font-serif text-2xl">{item.name}</h3><p className="mt-1 text-sm text-[#c9a84c]">{item.specialty}</p>{item.isApprentice && <span className="mt-2 inline-block rounded-full border border-[#c9a84c]/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-[#c9a84c]">Aprendiz</span>}</div>)}</div></>}
-    {tab === 'Horarios' && <><SectionHeader title="Horarios" text="Configura la disponibilidad general de la barbería." /><div className="max-w-2xl rounded border border-[#c9a84c]/20 bg-[#1a1916] p-6"><h2 className="font-serif text-2xl">Días de atención</h2><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day, index) => <button key={day} onClick={() => setSchedule({ ...schedule, days: schedule.days.map((x, n) => n === index ? !x : x) })} className={`day-button ${schedule.days[index] ? 'active' : ''}`}>{day}<span>{schedule.days[index] ? 'Abierto' : 'Cerrado'}</span></button>)}</div><div className="mt-8 grid gap-4 sm:grid-cols-2"><label className="form-label">Apertura<input type="time" value={schedule.start} onChange={(e) => setSchedule({ ...schedule, start: e.target.value })} className="dark-input" /></label><label className="form-label">Cierre<input type="time" value={schedule.end} onChange={(e) => setSchedule({ ...schedule, end: e.target.value })} className="dark-input" /></label></div><button className="gold-button mt-7">Guardar horarios <Check size={16} /></button></div></>}
+    {tab === 'Horarios' && <><SectionHeader title="Horarios" text="Configura la disponibilidad general de la barbería." /><div className="grid max-w-2xl gap-5"><div className="rounded border border-[#c9a84c]/20 bg-[#1a1916] p-6"><h2 className="font-serif text-2xl">Días de atención</h2><div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">{['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((day, index) => <button key={day} onClick={() => setSchedule({ ...schedule, days: schedule.days.map((x, n) => n === index ? !x : x) })} className={`day-button ${schedule.days[index] ? 'active' : ''}`}>{day}<span>{schedule.days[index] ? 'Abierto' : 'Cerrado'}</span></button>)}</div><div className="mt-8 grid gap-4 sm:grid-cols-2"><label className="form-label">Apertura<input type="time" value={schedule.start} onChange={(e) => setSchedule({ ...schedule, start: e.target.value })} className="dark-input" /></label><label className="form-label">Cierre<input type="time" value={schedule.end} onChange={(e) => setSchedule({ ...schedule, end: e.target.value })} className="dark-input" /></label></div><button className="gold-button mt-7">Guardar horarios <Check size={16} /></button></div><form onSubmit={submitBookingSettings} className="rounded border border-[#c9a84c]/20 bg-[#1a1916] p-6"><h2 className="font-serif text-2xl">Anticipación para reservar</h2><p className="mt-2 text-sm text-[#a0a0a0]">Activa un límite de meses para definir hasta cuándo pueden agendar citas.</p><label className="mt-5 flex items-center justify-between gap-4 text-sm"><span>Limitar meses para agendar</span><input type="checkbox" checked={bookingSettings.limitMonths} onChange={(event) => setBookingSettings((current) => ({ ...current, limitMonths: event.target.checked }))} /></label>{bookingSettings.limitMonths && <label className="form-label mt-5">Máximo de meses<input type="number" min="1" max="12" value={bookingSettings.maxMonths} onChange={(event) => setBookingSettings((current) => ({ ...current, maxMonths: Math.min(12, Math.max(1, Number(event.target.value) || 1)) }))} className="dark-input" /></label>}<button className="gold-button mt-6">Guardar límite <Check size={16} /></button></form><section className="rounded border border-[#c9a84c]/20 bg-[#1a1916] p-6"><h2 className="font-serif text-2xl">Fechas no laborables</h2><p className="mt-2 text-sm text-[#a0a0a0]">Cierra fechas específicas, por ejemplo durante las fiestas de diciembre.</p><form onSubmit={submitClosedDate} className="mt-5 flex flex-wrap gap-3"><input type="date" min={todayValue} value={closedDateDraft} onChange={(event) => setClosedDateDraft(event.target.value)} required className="dark-input min-w-48 flex-1" /><button className="gold-button"><Plus size={16} /> Agregar fecha</button></form><ul className="mt-5 divide-y divide-[#c9a84c]/10">{closedDates.map((date) => <li key={date} className="flex items-center justify-between gap-4 py-3 text-sm"><span>{dateLabel(date)}</span><button type="button" onClick={() => removeClosedDate(date)} className="icon-button danger" title="Volver a habilitar fecha"><Trash2 size={15} /></button></li>)}{closedDates.length === 0 && <li className="py-3 text-sm text-[#a0a0a0]">No hay fechas desactivadas.</li>}</ul></section></div></>}
   </div>{modal && <EntityModal modal={modal} setModal={setModal} onSave={save} onDelete={remove} />}</div>
 }
 function Dashboard({ appointments }) { const done = appointments.filter((x) => x.status === 'completada'); const todayAppointments = appointments.filter((x) => x.date === todayValue && x.status !== 'cancelada'); const stats = [['Citas hoy', todayAppointments.length, CalendarDays], ['Citas pendientes', appointments.filter((x) => x.status === 'pendiente').length, Clock3], ['Ingresos completados', currency.format(done.reduce((sum, x) => sum + x.price, 0)), Scissors]]; return <><SectionHeader title="Buenos días, equipo." text={`Agenda de hoy: ${dateLabel(todayValue)}.`} /><div className="grid gap-4 md:grid-cols-3">{stats.map(([label, value, Icon]) => <div key={label} className="stat-card"><Icon className="text-[#c9a84c]" size={20} /><p className="mt-6 text-sm text-[#a0a0a0]">{label}</p><strong className="mt-1 block font-serif text-3xl">{value}</strong></div>)}</div><div className="mt-7 rounded border border-[#c9a84c]/20 bg-[#1a1916] p-6"><h2 className="font-serif text-2xl">Citas de hoy</h2><div className="mt-4 divide-y divide-[#c9a84c]/10">{todayAppointments.length ? todayAppointments.map((item) => <div key={item.id} className="flex items-center justify-between py-4 text-sm"><div><strong>{item.client}</strong><p className="mt-1 text-[#a0a0a0]">{item.service} con {item.barber}</p></div><span className="text-[#c9a84c]">{item.time}</span></div>) : <p className="py-5 text-sm text-[#a0a0a0]">No hay citas programadas para hoy.</p>}</div></div></> }
@@ -121,6 +130,11 @@ export default function App() {
   const [success, setSuccess] = useState(false)
   const [session, setSession] = useState(null)
   const [occupiedTimes, setOccupiedTimes] = useState([])
+  const [availabilityLoading, setAvailabilityLoading] = useState(false)
+  const [availabilityError, setAvailabilityError] = useState('')
+  const [bookingSettings, setBookingSettings] = useState({ limitMonths: false, maxMonths: 2 })
+  const [closedDates, setClosedDates] = useState([])
+  const availabilityRequest = useRef(0)
 
   const loadCatalog = async () => {
     if (!supabase) return
@@ -131,14 +145,65 @@ export default function App() {
     if (serviceRows) setServices(serviceRows.map(toService))
     if (barberRows) setBarbers(barberRows.map(toBarber))
   }
-  const loadOccupiedTimes = async (date) => {
-    if (!supabase) {
-      const dayAppointments = appointments.filter((item) => item.date === date && item.status !== 'cancelada')
-      setOccupiedTimes(dayAppointments.flatMap((item) => requiredSlots(item.time, services.find((service) => service.name === item.service)?.duration || 30)))
+  const loadBookingData = async () => {
+    if (!supabase) return
+    const [{ data: settings, error: settingsError }, { data: dates, error: datesError }] = await Promise.all([
+      supabase.from('booking_settings').select('limit_months, max_months').eq('id', 1).maybeSingle(),
+      supabase.from('closed_dates').select('date').order('date'),
+    ])
+    if (settingsError) console.error('No fue posible cargar la configuración de citas.', settingsError)
+    else if (settings) setBookingSettings({ limitMonths: settings.limit_months, maxMonths: settings.max_months })
+    if (datesError) console.error('No fue posible cargar las fechas no laborables.', datesError)
+    else setClosedDates((dates || []).map((item) => item.date))
+  }
+  const saveBookingSettings = async (settings) => {
+    const normalized = { limitMonths: settings.limitMonths, maxMonths: Math.min(12, Math.max(1, Number(settings.maxMonths) || 1)) }
+    if (!supabase) { setBookingSettings(normalized); return true }
+    const { error } = await supabase.from('booking_settings').upsert({ id: 1, limit_months: normalized.limitMonths, max_months: normalized.maxMonths })
+    if (error) { window.alert(`No fue posible guardar el límite de citas. ${error.message}`); await loadBookingData(); return false }
+    setBookingSettings(normalized)
+    window.alert('Se guardó el límite de meses para agendar.')
+    return true
+  }
+  const addClosedDate = async (date) => {
+    if (!supabase) { setClosedDates((dates) => [...new Set([...dates, date])].sort()); return true }
+    const { error } = await supabase.from('closed_dates').insert({ date })
+    if (error) { window.alert(error.code === '23505' ? 'Esa fecha ya está desactivada.' : `No fue posible desactivar la fecha. ${error.message}`); return false }
+    setClosedDates((dates) => [...new Set([...dates, date])].sort())
+    return true
+  }
+  const removeClosedDate = async (date) => {
+    if (!supabase) { setClosedDates((dates) => dates.filter((item) => item !== date)); return }
+    const { error } = await supabase.from('closed_dates').delete().eq('date', date)
+    if (error) { window.alert(`No fue posible volver a habilitar la fecha. ${error.message}`); return }
+    setClosedDates((dates) => dates.filter((item) => item !== date))
+  }
+  const loadOccupiedTimes = async (date, barberId) => {
+    const requestId = ++availabilityRequest.current
+    setAvailabilityLoading(true)
+    setAvailabilityError('')
+    setOccupiedTimes([])
+    const selectedBarber = barbers.find((item) => item.id === barberId) || (barbers.length === 1 ? barbers[0] : null)
+    if (!selectedBarber) {
+      setAvailabilityLoading(false)
       return
     }
-    const { data } = await supabase.rpc('booked_appointment_times', { selected_date: date })
+    if (!supabase) {
+      const dayAppointments = appointments.filter((item) => item.date === date && item.barber === selectedBarber.name && item.status !== 'cancelada' && item.time !== walkInLabel)
+      setOccupiedTimes(dayAppointments.flatMap((item) => requiredSlots(item.time, services.find((service) => service.name === item.service)?.duration || 30)))
+      setAvailabilityLoading(false)
+      return
+    }
+    const { data, error } = await supabase.rpc('booked_appointment_times', { selected_date: date, selected_barber: selectedBarber.name })
+    if (requestId !== availabilityRequest.current) return
+    if (error) {
+      console.error('No fue posible consultar los horarios reservados.', error)
+      setAvailabilityError('No se pudo consultar la disponibilidad. Actualiza la base de datos y vuelve a intentarlo.')
+      setAvailabilityLoading(false)
+      return
+    }
     setOccupiedTimes((data || []).flatMap((item) => requiredSlots(item.appointment_time, item.duration || 30)))
+    setAvailabilityLoading(false)
   }
 
   const loadAppointments = async () => {
@@ -157,11 +222,16 @@ export default function App() {
       status: appointment.status, price: appointment.price,
     })
     if (error) {
-      window.alert(error.code === '23505' ? 'Este horario acaba de ser reservado. Elige otro para continuar.' : 'No fue posible guardar tu cita. Inténtalo de nuevo.')
-      await loadOccupiedTimes(appointment.date)
+      const message = error.code === '23505' || error.code === '23P01'
+        ? 'Ese horario acaba de ocuparse con este barbero. Elige otro para continuar.'
+        : error.code === '23514'
+          ? 'La fecha ya no está disponible o quedó fuera del periodo permitido para reservar.'
+          : `No fue posible guardar tu cita. ${error.message || 'Inténtalo de nuevo.'}`
+      window.alert(message)
+      await loadOccupiedTimes(appointment.date, barbers.find((item) => item.name === appointment.barber)?.id)
       return null
     }
-    await loadOccupiedTimes(appointment.date)
+    await loadOccupiedTimes(appointment.date, barbers.find((item) => item.name === appointment.barber)?.id)
     return appointment
   }
   const updateAppointment = async (id, status) => {
@@ -207,13 +277,14 @@ export default function App() {
   useEffect(() => {
     if (!supabase) return undefined
     loadCatalog()
+    loadBookingData()
     supabase.auth.getSession().then(({ data }) => setSession(data.session))
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession))
     return () => listener.subscription.unsubscribe()
   }, [])
   useEffect(() => { if (session) loadAppointments() }, [session])
-  useEffect(() => { loadOccupiedTimes(booking.date) }, [booking.date])
+  useEffect(() => { loadOccupiedTimes(booking.date, booking.barber) }, [booking.date, booking.barber, barbers, services, appointments])
 
   const leaveAdmin = async () => { if (supabase) await supabase.auth.signOut(); setView('public') }
-  return <main className="min-h-screen bg-[#0f0e0c] text-[#f5f5f5] antialiased">{view === 'public' ? <PublicBooking {...{ services, barbers, step, setStep, booking, setBooking, success, setSuccess, saveAppointment, occupiedTimes }} onAdminOpen={() => setView('admin-login')} /> : session ? <AdminPanel {...{ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment, saveCatalogItem, deleteCatalogItem, clearCancelledAppointments, deleteAppointment }} onExit={leaveAdmin} /> : <AdminLogin onAccess={() => setView('admin')} onBack={() => setView('public')} />}</main>
+  return <main className="min-h-screen bg-[#0f0e0c] text-[#f5f5f5] antialiased">{view === 'public' ? <PublicBooking {...{ services, barbers, step, setStep, booking, setBooking, success, setSuccess, saveAppointment, occupiedTimes, availabilityLoading, availabilityError, bookingSettings, closedDates }} onAdminOpen={() => setView('admin-login')} /> : session ? <AdminPanel {...{ services, setServices, barbers, setBarbers, appointments, setAppointments, updateAppointment, saveCatalogItem, deleteCatalogItem, clearCancelledAppointments, deleteAppointment, bookingSettings, setBookingSettings, saveBookingSettings, closedDates, addClosedDate, removeClosedDate }} onExit={leaveAdmin} /> : <AdminLogin onAccess={() => setView('admin')} onBack={() => setView('public')} />}</main>
 }
